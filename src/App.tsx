@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ShoppingBag, MessageCircle, Star, Sparkles, Camera, Plus, Trash2, Edit2, Package, Settings, ArrowLeft, Image as ImageIcon, CheckCircle2, ShoppingCart, X, Minus, Lock, Key, Bell, BellRing } from 'lucide-react';
+import { ShoppingBag, MessageCircle, Star, Sparkles, Camera, Plus, Trash2, Edit2, Package, Settings, ArrowLeft, Image as ImageIcon, CheckCircle2, ShoppingCart, X, Minus, Lock, Key, Bell, BellRing, Video, PlayCircle, Eye, TrendingUp, Box, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './supabase';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
@@ -17,6 +17,7 @@ type Product = {
   image: string;
   description: string;
   createdAt?: number;
+  video?: string;
 };
 
 type CartItem = Product & {
@@ -33,6 +34,16 @@ type NotificationItem = {
   productId?: string;
 };
 
+type Sale = {
+  id: string;
+  product_id: string | null;
+  product_name: string;
+  quantity: number;
+  price_at_sale: number;
+  total_price: number;
+  sale_date: string;
+};
+
 const DEFAULT_WHATSAPP = '5599999999999';
 
 export default function App() {
@@ -43,6 +54,8 @@ export default function App() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [whatsappNumber, setWhatsappNumber] = useState(DEFAULT_WHATSAPP);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [adminTab, setAdminTab] = useState<'products' | 'sales' | 'dashboard'>('products');
 
   // Auth State Listener
   useEffect(() => {
@@ -85,13 +98,30 @@ export default function App() {
       setIsLoaded(true);
     };
 
+    const fetchSales = async () => {
+      const { data, error } = await supabase
+        .from('sales')
+        .select('*')
+        .order('sale_date', { ascending: false });
+      
+      if (error) {
+        console.error("Error fetching sales:", error);
+      } else {
+        setSales(data as Sale[]);
+      }
+    };
+
     fetchProducts();
+    fetchSales();
 
     // Subscribe to realtime changes
     const channel = supabase
-      .channel('products_changes')
+      .channel('db_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, (payload) => {
-        fetchProducts(); // Re-fetch on any change
+        fetchProducts(); 
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, (payload) => {
+        fetchSales();
       })
       .subscribe();
 
@@ -206,6 +236,10 @@ export default function App() {
                 setProducts={setProducts}
                 whatsappNumber={whatsappNumber}
                 setWhatsappNumber={setWhatsappNumber}
+                sales={sales}
+                setSales={setSales}
+                adminTab={adminTab}
+                setAdminTab={setAdminTab}
               />
             } 
           />
@@ -219,7 +253,7 @@ export default function App() {
 }
 
 // Guarda de Rota para o Admin
-function AdminRouteGuard({ user, products, setProducts, whatsappNumber, setWhatsappNumber }: any) {
+function AdminRouteGuard({ user, products, setProducts, whatsappNumber, setWhatsappNumber, sales, setSales, adminTab, setAdminTab }: any) {
   const navigate = useNavigate();
   
   // Se não estiver logado ou não for o admin, mostra o login
@@ -234,6 +268,10 @@ function AdminRouteGuard({ user, products, setProducts, whatsappNumber, setWhats
       whatsappNumber={whatsappNumber} 
       setWhatsappNumber={setWhatsappNumber} 
       onClose={() => navigate('/')} 
+      sales={sales}
+      setSales={setSales}
+      adminTab={adminTab}
+      setAdminTab={setAdminTab}
     />
   );
 }
@@ -958,12 +996,31 @@ function Storefront({
                 <X className="w-5 h-5" />
               </button>
 
-              <div className="w-full md:w-1/2 aspect-square md:aspect-auto overflow-hidden bg-slate-100">
-                <img 
-                  src={selectedProduct.image} 
-                  alt={selectedProduct.name}
-                  className="w-full h-full object-cover"
-                />
+              <div className="w-full md:w-1/2 overflow-hidden bg-slate-100 relative group">
+                {selectedProduct.video ? (
+                  <div className="w-full h-full relative aspect-square md:aspect-auto">
+                    <video 
+                      src={selectedProduct.video}
+                      className="w-full h-full object-cover"
+                      controls
+                      autoPlay
+                      muted
+                      playsInline
+                    />
+                    <div className="absolute top-4 left-4 z-10">
+                      <span className="flex items-center gap-1.5 bg-rose-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border border-rose-400/30 backdrop-blur-sm animate-pulse">
+                        <Video className="w-3 h-3" />
+                        VÍDEO REAL
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <img 
+                    src={selectedProduct.image} 
+                    alt={selectedProduct.name}
+                    className="w-full h-full object-cover"
+                  />
+                )}
               </div>
 
               <div className="w-full md:w-1/2 p-6 md:p-8 flex flex-col overflow-y-auto">
@@ -1076,19 +1133,33 @@ function AdminPanel({
   setProducts, 
   whatsappNumber,
   setWhatsappNumber,
-  onClose 
+  onClose,
+  sales,
+  setSales,
+  adminTab,
+  setAdminTab
 }: { 
   products: Product[], 
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>, 
   whatsappNumber: string,
   setWhatsappNumber: React.Dispatch<React.SetStateAction<string>>,
-  onClose: () => void 
+  onClose: () => void,
+  sales: Sale[],
+  setSales: React.Dispatch<React.SetStateAction<Sale[]>>,
+  adminTab: 'products' | 'sales' | 'dashboard',
+  setAdminTab: React.Dispatch<React.SetStateAction<'products' | 'sales' | 'dashboard'>>
 }) {
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string, type: 'error' | 'success' } | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDeleteSaleId, setConfirmDeleteSaleId] = useState<string | null>(null);
+  const [isRecordingSale, setIsRecordingSale] = useState(false);
+  const [saleFormData, setSaleFormData] = useState({
+    productId: '',
+    quantity: '1'
+  });
   
   // Form State
   const [formData, setFormData] = useState({
@@ -1096,24 +1167,116 @@ function AdminPanel({
     price: '',
     stock: '',
     description: '',
-    image: ''
+    image: '',
+    video: ''
   });
+
+  const [isVideoUploading, setIsVideoUploading] = useState(false);
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const totalStock = products.reduce((acc, p) => acc + p.stock, 0);
   const totalValue = products.reduce((acc, p) => acc + (p.price * p.stock), 0);
+  const totalRevenue = sales.reduce((acc, s) => acc + s.total_price, 0);
+  const totalItemsSold = sales.reduce((acc, s) => acc + s.quantity, 0);
 
   const showToast = (text: string, type: 'error' | 'success' = 'error') => {
     setToastMessage({ text, type });
     setTimeout(() => setToastMessage(null), 3000);
   };
 
+  const handleRecordSale = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const product = products.find(p => p.id === saleFormData.productId);
+    if (!product) {
+      showToast('Selecione um produto.');
+      return;
+    }
+    const qty = parseInt(saleFormData.quantity);
+    if (isNaN(qty) || qty <= 0) {
+      showToast('Quantidade inválida.');
+      return;
+    }
+    if (qty > product.stock) {
+      showToast('Estoque insuficiente!');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const totalPrice = product.price * qty;
+      const { data: newSale, error: saleError } = await supabase
+        .from('sales')
+        .insert({
+          product_id: product.id,
+          product_name: product.name,
+          quantity: qty,
+          price_at_sale: product.price,
+          total_price: totalPrice
+        })
+        .select()
+        .single();
+
+      if (saleError) throw saleError;
+
+      // Update product stock
+      const { error: stockError } = await supabase
+        .from('products')
+        .update({ stock: product.stock - qty })
+        .eq('id', product.id);
+
+      if (stockError) throw stockError;
+
+      showToast('Venda registrada com sucesso!', 'success');
+      setSales([newSale as Sale, ...sales]);
+      setIsRecordingSale(false);
+      setSaleFormData({ productId: '', quantity: '1' });
+    } catch (error) {
+      console.error("Error recording sale:", error);
+      showToast('Erro ao registrar venda.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const confirmDeleteSale = async () => {
+    if (!confirmDeleteSaleId) return;
+    const sale = sales.find(s => s.id === confirmDeleteSaleId);
+    if (!sale) return;
+
+    try {
+      // Repor estoque se o produto ainda existir
+      if (sale.product_id) {
+        const product = products.find(p => p.id === sale.product_id);
+        if (product) {
+          await supabase
+            .from('products')
+            .update({ stock: product.stock + sale.quantity })
+            .eq('id', product.id);
+        }
+      }
+
+      const { error } = await supabase.from('sales').delete().eq('id', confirmDeleteSaleId);
+      if (error) throw error;
+
+      setSales(sales.filter(s => s.id !== confirmDeleteSaleId));
+      showToast('Venda removida e estoque reposto.', 'success');
+    } catch (error) {
+      console.error("Error deleting sale:", error);
+      showToast('Erro ao remover venda.');
+    } finally {
+      setConfirmDeleteSaleId(null);
+    }
+  };
+
+
   const resetForm = () => {
-    setFormData({ name: '', price: '', stock: '', description: '', image: '' });
+    setFormData({ name: '', price: '', stock: '', description: '', image: '', video: '' });
     setEditingId(null);
     setIsAdding(false);
     setIsSaving(false);
+    setIsVideoUploading(false);
   };
 
   const handleEdit = (product: Product) => {
@@ -1122,7 +1285,8 @@ function AdminPanel({
       price: product.price.toString(),
       stock: product.stock.toString(),
       description: product.description,
-      image: product.image
+      image: product.image,
+      video: product.video || ''
     });
     setEditingId(product.id);
     setIsAdding(true);
@@ -1199,6 +1363,42 @@ function AdminPanel({
     reader.readAsDataURL(file);
   };
   
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Check size (limit to 10MB for this example, adjust as needed)
+    if (file.size > 10 * 1024 * 1024) {
+      showToast('O vídeo deve ter no máximo 10MB.');
+      return;
+    }
+
+    setIsVideoUploading(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('product-videos')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('product-videos')
+        .getPublicUrl(filePath);
+
+      setFormData(prev => ({ ...prev, video: publicUrl }));
+      showToast('Vídeo enviado com sucesso!', 'success');
+    } catch (error) {
+      console.error('Error uploading video:', error);
+      showToast('Erro ao enviar vídeo.');
+    } finally {
+      setIsVideoUploading(false);
+    }
+  };
+  
   const handleIAAnalysis = () => {
     window.open('https://gemini.google.com/app', '_blank');
     showToast('Abrindo o Gemini para você criar sua descrição! ✨', 'success');
@@ -1220,7 +1420,8 @@ function AdminPanel({
         price: parseFloat(formData.price),
         stock: parseInt(formData.stock) || 0,
         description: formData.description,
-        image: formData.image
+        image: formData.image,
+        video: formData.video
       };
 
       if (editingId) {
@@ -1302,7 +1503,7 @@ function AdminPanel({
         )}
       </AnimatePresence>
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Confirmation Modal (Products) */}
       <AnimatePresence>
         {confirmDeleteId && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -1336,321 +1537,580 @@ function AdminPanel({
         )}
       </AnimatePresence>
 
+      {/* Delete Sale Confirmation Modal */}
+      <AnimatePresence>
+        {confirmDeleteSaleId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center"
+            >
+              <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-800 mb-2">Excluir Venda?</h3>
+              <p className="text-slate-500 mb-6">O estoque deste produto será reposto automaticamente.</p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setConfirmDeleteSaleId(null)}
+                  className="flex-1 py-3 px-4 rounded-xl font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={confirmDeleteSale}
+                  className="flex-1 py-3 px-4 rounded-xl font-medium text-white bg-red-500 hover:bg-red-600 transition-colors shadow-sm"
+                >
+                  Confirmar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+
       {/* Admin Header */}
       <header className="bg-slate-900 text-white shadow-md sticky top-0 z-20">
-        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center gap-3">
             <button onClick={onClose} className="p-2 -ml-2 hover:bg-slate-800 rounded-full transition-colors">
               <ArrowLeft className="w-5 h-5" />
             </button>
             <h1 className="text-xl font-bold flex items-center gap-2">
               <Settings className="w-5 h-5 text-rose-400" />
-              Gestão da Loja
+              <span className="hidden sm:inline">Gestão da Loja</span>
+              <span className="sm:hidden text-sm uppercase tracking-widest text-rose-400">{adminTab}</span>
             </h1>
           </div>
-          <div className="flex items-center gap-4">
-            <a href="#" onClick={handleLogout} className="text-sm font-medium text-rose-400 hover:text-rose-300">
+          <div className="flex items-center gap-6">
+            <div className="hidden md:flex items-center gap-1 bg-slate-800 p-1 rounded-xl">
+              <button 
+                onClick={() => setAdminTab('products')}
+                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${adminTab === 'products' ? 'bg-rose-500 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+              >
+                Produtos
+              </button>
+              <button 
+                onClick={() => setAdminTab('sales')}
+                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${adminTab === 'sales' ? 'bg-rose-500 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+              >
+                Vendas
+              </button>
+              <button 
+                onClick={() => setAdminTab('dashboard')}
+                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${adminTab === 'dashboard' ? 'bg-rose-500 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+              >
+                Estatística
+              </button>
+            </div>
+            <a href="#" onClick={handleLogout} className="text-sm font-medium text-slate-400 hover:text-rose-400 transition-colors">
               Sair
             </a>
           </div>
+        </div>
+
+        {/* Mobile Tabs */}
+        <div className="md:hidden flex border-b border-slate-800">
+          <button 
+            onClick={() => setAdminTab('products')}
+            className={`flex-1 py-3 text-xs font-bold uppercase tracking-tighter border-b-2 transition-colors ${adminTab === 'products' ? 'border-rose-500 text-rose-400 bg-rose-500/5' : 'border-transparent text-slate-500'}`}
+          >
+            Produtos
+          </button>
+          <button 
+            onClick={() => setAdminTab('sales')}
+            className={`flex-1 py-3 text-xs font-bold uppercase tracking-tighter border-b-2 transition-colors ${adminTab === 'sales' ? 'border-rose-500 text-rose-400 bg-rose-500/5' : 'border-transparent text-slate-500'}`}
+          >
+            Vendas
+          </button>
+          <button 
+            onClick={() => setAdminTab('dashboard')}
+            className={`flex-1 py-3 text-xs font-bold uppercase tracking-tighter border-b-2 transition-colors ${adminTab === 'dashboard' ? 'border-rose-500 text-rose-400 bg-rose-500/5' : 'border-transparent text-slate-500'}`}
+          >
+            Estatística
+          </button>
         </div>
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-8">
         
-        {/* Dashboard Stats */}
-        {!isAdding && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-              <p className="text-sm text-slate-500 font-medium mb-1">Total de Produtos</p>
-              <p className="text-2xl font-bold text-slate-900">{products.length}</p>
+        {adminTab === 'dashboard' && (
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-4">
+                <div className="p-3 bg-emerald-100 text-emerald-600 rounded-2xl">
+                  <TrendingUp className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500 font-medium">Faturamento</p>
+                  <p className="text-2xl font-bold text-emerald-600">R$ {totalRevenue.toFixed(2).replace('.', ',')}</p>
+                </div>
+              </div>
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-4">
+                <div className="p-3 bg-rose-100 text-rose-600 rounded-2xl">
+                  <ShoppingBag className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500 font-medium">Total de Saídas</p>
+                  <p className="text-2xl font-bold text-slate-900">{sales.length}</p>
+                </div>
+              </div>
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-4">
+                <div className="p-3 bg-blue-100 text-blue-600 rounded-2xl">
+                  <Package className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500 font-medium">Itens Vendidos</p>
+                  <p className="text-2xl font-bold text-slate-900">{totalItemsSold}</p>
+                </div>
+              </div>
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-4">
+                <div className="p-3 bg-amber-100 text-amber-600 rounded-2xl">
+                  <Box className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500 font-medium">Estoque Total</p>
+                  <p className="text-2xl font-bold text-slate-900">{totalStock}</p>
+                </div>
+              </div>
             </div>
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-              <p className="text-sm text-slate-500 font-medium mb-1">Itens em Estoque</p>
-              <p className="text-2xl font-bold text-slate-900">{totalStock}</p>
-            </div>
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 col-span-2 md:col-span-2">
-              <p className="text-sm text-slate-500 font-medium mb-1">Valor em Estoque</p>
-              <p className="text-2xl font-bold text-emerald-600">R$ {totalValue.toFixed(2).replace('.', ',')}</p>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+               <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+                <h3 className="text-lg font-bold text-slate-800 mb-4">Valor em Mercadoria</h3>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-bold text-slate-900">R$ {totalValue.toFixed(2).replace('.', ',')}</span>
+                  <span className="text-sm text-slate-500">Preço de Venda</span>
+                </div>
+                <div className="mt-6 pt-6 border-t border-slate-100">
+                   <div className="flex justify-between items-center text-sm mb-2">
+                      <span className="text-slate-500">Variedade de Produtos</span>
+                      <span className="font-bold text-slate-800">{products.length} itens</span>
+                   </div>
+                   <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                      <div className="bg-emerald-500 h-full" style={{ width: '100%' }}></div>
+                   </div>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+                <h3 className="text-lg font-bold text-slate-800 mb-4">Quick Insights</h3>
+                <ul className="space-y-4">
+                  <li className="flex items-center gap-3 text-sm">
+                    <div className="w-2 h-2 rounded-full bg-rose-500"></div>
+                    <span className="text-slate-600">Existem <strong className="text-slate-800">{products.filter(p => p.stock <= 0).length}</strong> produtos sem estoque.</span>
+                  </li>
+                  <li className="flex items-center gap-3 text-sm">
+                    <div className="w-2 h-2 rounded-full bg-amber-500"></div>
+                    <span className="text-slate-600"><strong className="text-slate-800">{products.filter(p => p.stock > 0 && p.stock < 5).length}</strong> produtos com estoque baixo (menos de 5).</span>
+                  </li>
+                  <li className="flex items-center gap-3 text-sm">
+                    <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                    <span className="text-slate-600">A maior venda unitária foi de {sales.length > 0 ? Math.max(...sales.map(s => s.quantity)) : 0} itens.</span>
+                  </li>
+                </ul>
+              </div>
             </div>
           </div>
         )}
 
-        <AnimatePresence mode="wait">
-          {isAdding ? (
-            <motion.div
-              key="form"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden"
-            >
-              <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                <h2 className="text-xl font-bold text-slate-800">
-                  {editingId ? 'Editar Produto' : 'Novo Produto'}
-                </h2>
-                <button onClick={resetForm} className="text-slate-500 hover:text-slate-700 font-medium text-sm">
-                  Cancelar
-                </button>
-              </div>
-
-              <form onSubmit={handleSubmit} className="p-6 space-y-6">
-                {/* Photo Upload / Capture */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Foto do Produto</label>
-                  <div className="flex flex-col sm:flex-row gap-4 items-start">
-                    <div 
-                      className="w-32 h-32 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center overflow-hidden relative group cursor-pointer"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      {formData.image ? (
-                        <>
-                          <img src={formData.image} alt="Preview" className="w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Edit2 className="w-6 h-6 text-white" />
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <Camera className="w-8 h-8 text-slate-400 mb-2" />
-                          <span className="text-xs text-slate-500 font-medium">Tirar Foto</span>
-                        </>
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm text-slate-500 mb-3">
-                        Tire uma foto do produto agora mesmo usando a câmera do seu celular ou escolha da galeria.
-                      </p>
-                      <div className="flex gap-2">
-                        <button 
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="flex items-center gap-2 bg-rose-100 text-rose-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-200 transition-colors"
-                        >
-                          <Camera className="w-4 h-4" />
-                          Câmera / Galeria
-                        </button>
-                      </div>
-                      {/* Hidden file input with capture attribute for mobile cameras */}
-                      <input 
-                        type="file" 
-                        ref={fileInputRef}
-                        accept="image/*"
-                        capture="environment"
-                        onChange={handleImageCapture}
-                        className="hidden"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleIAAnalysis}
-                      disabled={isSaving}
-                      className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg disabled:opacity-50"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                      Ir para o Gemini IA 🍌
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">Nome do Produto</label>
-                    <input 
-                      type="text" 
-                      required
-                      value={formData.name}
-                      onChange={e => setFormData({...formData, name: e.target.value})}
-                      className="w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent"
-                      placeholder="Ex: Sérum Facial Vitamina C"
-                    />
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Preço (R$)</label>
-                      <input 
-                        type="number" 
-                        step="0.01"
-                        min="0"
-                        required
-                        value={formData.price}
-                        onChange={e => setFormData({...formData, price: e.target.value})}
-                        className="w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent"
-                        placeholder="0.00"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Estoque</label>
-                      <input 
-                        type="number" 
-                        min="0"
-                        required
-                        value={formData.stock}
-                        onChange={e => setFormData({...formData, stock: e.target.value})}
-                        className="w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent"
-                        placeholder="Qtd"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Descrição Curta</label>
-                  <textarea 
-                    rows={3}
-                    value={formData.description}
-                    onChange={e => setFormData({...formData, description: e.target.value})}
-                    className="w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent resize-none"
-                    placeholder="Descreva os benefícios do produto..."
-                  />
-                </div>
-
-                <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
-                  <button 
-                    type="button"
-                    onClick={resetForm}
-                    disabled={isSaving}
-                    className="px-6 py-3 rounded-xl font-medium text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
-                  >
-                    Cancelar
-                  </button>
-                  <button 
-                    type="submit"
-                    disabled={isSaving}
-                    className="flex items-center gap-2 bg-slate-900 text-white px-8 py-3 rounded-xl font-medium hover:bg-slate-800 transition-colors shadow-md disabled:opacity-70 disabled:cursor-not-allowed"
-                  >
-                    <CheckCircle2 className="w-5 h-5" />
-                    {isSaving ? 'Salvando...' : 'Salvar Produto'}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="list"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-bold text-slate-800">Seus Produtos</h2>
-                <button 
-                  onClick={() => setIsAdding(true)}
-                  className="flex items-center gap-2 bg-rose-500 text-white px-4 py-2 rounded-xl font-medium hover:bg-rose-600 transition-colors shadow-sm"
-                >
-                  <Plus className="w-5 h-5" />
-                  <span className="hidden sm:inline">Adicionar Produto</span>
-                  <span className="sm:hidden">Novo</span>
-                </button>
-              </div>
-
-              {products.length === 0 ? (
-                <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center">
-                  <Package className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                  <h3 className="text-lg font-bold text-slate-700 mb-2">Nenhum produto cadastrado</h3>
-                  <p className="text-slate-500 mb-6">Comece a montar seu catálogo agora mesmo.</p>
-                  <button 
-                    onClick={() => setIsAdding(true)}
-                    className="inline-flex items-center gap-2 bg-rose-100 text-rose-700 px-6 py-3 rounded-xl font-medium hover:bg-rose-200 transition-colors"
-                  >
-                    <Plus className="w-5 h-5" />
-                    Cadastrar Primeiro Produto
-                  </button>
-                </div>
-              ) : (
-                <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-sm font-semibold text-slate-600">
-                          <th className="p-4 whitespace-nowrap">Produto</th>
-                          <th className="p-4 whitespace-nowrap">Preço</th>
-                          <th className="p-4 whitespace-nowrap">Estoque</th>
-                          <th className="p-4 whitespace-nowrap text-right">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {products.map((product) => (
-                          <tr key={product.id} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="p-4">
-                              <div className="flex items-center gap-3">
-                                <img src={product.image} alt="" className="w-12 h-12 rounded-lg object-cover border border-slate-200" />
-                                <div>
-                                  <p className="font-semibold text-slate-900 line-clamp-1">{product.name}</p>
-                                  <p className="text-xs text-slate-500 line-clamp-1 w-48 sm:w-auto">{product.description}</p>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="p-4 font-medium text-slate-900 whitespace-nowrap">
-                              R$ {product.price.toFixed(2).replace('.', ',')}
-                            </td>
-                            <td className="p-4 whitespace-nowrap">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                product.stock > 10 ? 'bg-emerald-100 text-emerald-800' : 
-                                product.stock > 0 ? 'bg-amber-100 text-amber-800' : 
-                                'bg-red-100 text-red-800'
-                              }`}>
-                                {product.stock} un
-                              </span>
-                            </td>
-                            <td className="p-4 text-right whitespace-nowrap">
-                              <div className="flex items-center justify-end gap-2">
-                                <button 
-                                  onClick={() => handleEdit(product)}
-                                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                  title="Editar"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button 
-                                  onClick={() => handleDelete(product.id)}
-                                  className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                  title="Excluir"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Settings Section */}
-        {!isAdding && (
-          <div className="mt-8 bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden p-6">
-            <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <MessageCircle className="w-6 h-6 text-emerald-500" />
-              Configurações do WhatsApp
-            </h2>
-            <p className="text-slate-500 mb-6 text-sm">
-              Defina o número de WhatsApp que receberá os pedidos da loja. Use o formato internacional (ex: 5511999999999).
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 items-end">
-              <div className="flex-1 w-full">
-                <label className="block text-sm font-medium text-slate-700 mb-1">Número do WhatsApp</label>
-                <input 
-                  type="text" 
-                  value={whatsappNumber}
-                  onChange={(e) => setWhatsappNumber(e.target.value.replace(/\D/g, ''))}
-                  placeholder="Ex: 5511999999999"
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-emerald-200 transition-all"
-                />
-              </div>
+        {adminTab === 'sales' && (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-bold text-slate-800">Controle de Saídas</h2>
               <button 
-                onClick={handleSaveWhatsapp}
-                className="w-full sm:w-auto px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl transition-colors shadow-sm"
+                onClick={() => setIsRecordingSale(!isRecordingSale)}
+                className="flex items-center gap-2 bg-emerald-500 text-white px-4 py-2 rounded-xl font-medium hover:bg-emerald-600 transition-colors shadow-sm"
               >
-                Salvar Número
+                <Plus className="w-5 h-5" />
+                Registrar Saída Manual
               </button>
             </div>
+
+            {isRecordingSale && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-emerald-50 border border-emerald-100 rounded-3xl p-6"
+              >
+                <form onSubmit={handleRecordSale} className="flex flex-col md:flex-row gap-4 items-end">
+                  <div className="flex-1 w-full">
+                    <label className="block text-xs font-bold text-emerald-700 mb-1 uppercase tracking-wider">Produto</label>
+                    <select 
+                      value={saleFormData.productId}
+                      onChange={e => setSaleFormData({...saleFormData, productId: e.target.value})}
+                      className="w-full bg-white border border-emerald-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="">Selecione um produto</option>
+                      {products.map(p => (
+                        <option key={p.id} value={p.id} disabled={p.stock <= 0}>
+                          {p.name} ({p.stock} un em estoque)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="w-full md:w-32">
+                    <label className="block text-xs font-bold text-emerald-700 mb-1 uppercase tracking-wider">Quantidade</label>
+                    <input 
+                      type="number"
+                      min="1"
+                      value={saleFormData.quantity}
+                      onChange={e => setSaleFormData({...saleFormData, quantity: e.target.value})}
+                      className="w-full bg-white border border-emerald-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div className="flex gap-2 w-full md:w-auto">
+                    <button 
+                      type="submit"
+                      disabled={isSaving}
+                      className="flex-1 md:flex-none px-6 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-all"
+                    >
+                      Gravar
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => setIsRecordingSale(false)}
+                      className="px-6 py-3 bg-white text-slate-600 border border-slate-200 font-bold rounded-xl hover:bg-slate-50 transition-all"
+                    >
+                      Fechar
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            )}
+
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-sm font-semibold text-slate-600">
+                      <th className="p-4 whitespace-nowrap">Data</th>
+                      <th className="p-4 whitespace-nowrap">Produto</th>
+                      <th className="p-4 whitespace-nowrap">Qtd</th>
+                      <th className="p-4 whitespace-nowrap">Valor</th>
+                      <th className="p-4 whitespace-nowrap text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {sales.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-12 text-center text-slate-400">
+                          Nenhuma venda registrada ainda.
+                        </td>
+                      </tr>
+                    ) : (
+                      sales.map((sale) => (
+                        <tr key={sale.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-4 text-xs text-slate-500 whitespace-nowrap">
+                            {new Date(sale.sale_date).toLocaleDateString('pt-BR')} {new Date(sale.sale_date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="p-4 font-bold text-slate-800">
+                            {sale.product_name}
+                          </td>
+                          <td className="p-4 text-slate-600">
+                            {sale.quantity} un
+                          </td>
+                          <td className="p-4 font-bold text-emerald-600 whitespace-nowrap">
+                            R$ {sale.total_price.toFixed(2).replace('.', ',')}
+                          </td>
+                          <td className="p-4 text-right whitespace-nowrap">
+                             <button 
+                              onClick={() => setConfirmDeleteSaleId(sale.id)}
+                              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Excluir Registro"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {adminTab === 'products' && (
+          <div className="space-y-6">
+            <AnimatePresence mode="wait">
+              {isAdding ? (
+                <motion.div
+                  key="form"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden"
+                >
+                  <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h2 className="text-xl font-bold text-slate-800">
+                      {editingId ? 'Editar Produto' : 'Novo Produto'}
+                    </h2>
+                    <button onClick={resetForm} className="text-slate-500 hover:text-slate-700 font-medium text-sm">
+                      Cancelar
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSubmit} className="p-6 space-y-6">
+                    <div className="flex flex-col md:flex-row gap-8">
+                      {/* Photo Upload / Capture */}
+                      <div className="flex-1">
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">Foto do Produto</label>
+                        <div className="flex flex-col sm:flex-row gap-4 items-start">
+                          <div 
+                            className="w-32 h-32 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center overflow-hidden relative group cursor-pointer"
+                            onClick={() => fileInputRef.current?.click()}
+                          >
+                            {formData.image ? (
+                              <>
+                                <img src={formData.image} alt="Preview" className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Edit2 className="w-6 h-6 text-white" />
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <Camera className="w-8 h-8 text-slate-400 mb-2" />
+                                <span className="text-xs text-slate-500 font-medium">Tirar Foto</span>
+                              </>
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-sm text-slate-500 mb-3">
+                              Adicione uma foto nítida do produto.
+                            </p>
+                            <button 
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              className="flex items-center gap-2 bg-rose-100 text-rose-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-200 transition-colors"
+                            >
+                              <Camera className="w-4 h-4" />
+                              Câmera / Galeria
+                            </button>
+                            <input 
+                              type="file" 
+                              ref={fileInputRef}
+                              accept="image/*"
+                              capture="environment"
+                              onChange={handleImageCapture}
+                              className="hidden"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Video Upload Section */}
+                      <div className="flex-1">
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">Vídeo do Produto (Opcional)</label>
+                        <div className="flex flex-col sm:flex-row gap-4 items-start">
+                          <div 
+                            className="w-32 h-32 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center overflow-hidden relative group cursor-pointer"
+                            onClick={() => !isVideoUploading && videoInputRef.current?.click()}
+                          >
+                            {formData.video ? (
+                              <div className="w-full h-full bg-slate-900 flex items-center justify-center">
+                                <PlayCircle className="w-10 h-10 text-white" />
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Edit2 className="w-6 h-6 text-white" />
+                                </div>
+                              </div>
+                            ) : isVideoUploading ? (
+                              <div className="flex flex-col items-center">
+                                <div className="w-6 h-6 border-2 border-rose-500 border-t-transparent rounded-full animate-spin mb-2" />
+                                <span className="text-[10px] text-slate-500 font-bold uppercase">Enviando...</span>
+                              </div>
+                            ) : (
+                              <>
+                                <Video className="w-8 h-8 text-slate-400 mb-2" />
+                                <span className="text-xs text-slate-500 font-medium text-center px-2">Anexar Vídeo</span>
+                              </>
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-sm text-slate-500 mb-3">
+                              Adicione um vídeo mostrando o produto.
+                            </p>
+                            <button 
+                              type="button"
+                              disabled={isVideoUploading}
+                              onClick={() => videoInputRef.current?.click()}
+                              className="flex items-center gap-2 bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors disabled:opacity-50"
+                            >
+                              <Video className="w-4 h-4" />
+                              Escolher Vídeo
+                            </button>
+                            <input 
+                              type="file" 
+                              ref={videoInputRef}
+                              accept="video/*"
+                              onChange={handleVideoUpload}
+                              className="hidden"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleIAAnalysis}
+                        className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md"
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        Ajudar com Descrição (IA)
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">Nome do Produto</label>
+                        <input 
+                          type="text" 
+                          required
+                          value={formData.name}
+                          onChange={e => setFormData({...formData, name: e.target.value})}
+                          className="w-full border border-slate-300 rounded-xl px-4 py-3"
+                          placeholder="Ex: Sérum Facial Vitamina C"
+                        />
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-700 mb-2">Preço (R$)</label>
+                          <input 
+                            type="number" 
+                            step="0.01"
+                            required
+                            value={formData.price}
+                            onChange={e => setFormData({...formData, price: e.target.value})}
+                            className="w-full border border-slate-300 rounded-xl px-4 py-3"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-700 mb-2">Estoque</label>
+                          <input 
+                            type="number" 
+                            required
+                            value={formData.stock}
+                            onChange={e => setFormData({...formData, stock: e.target.value})}
+                            className="w-full border border-slate-300 rounded-xl px-4 py-3"
+                            placeholder="Qtd"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">Descrição</label>
+                      <textarea 
+                        rows={3}
+                        value={formData.description}
+                        onChange={e => setFormData({...formData, description: e.target.value})}
+                        className="w-full border border-slate-300 rounded-xl px-4 py-3 resize-none"
+                        placeholder="Detalhes sobre o produto..."
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                      <button type="button" onClick={resetForm} className="px-6 py-3 font-medium text-slate-600">Cancelar</button>
+                      <button type="submit" className="bg-slate-900 text-white px-8 py-3 rounded-xl font-medium">Salvar Produto</button>
+                    </div>
+                  </form>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="list"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-xl font-bold text-slate-800">Catálogo de Produtos</h2>
+                    <button 
+                      onClick={() => setIsAdding(true)}
+                      className="flex items-center gap-2 bg-rose-500 text-white px-4 py-2 rounded-xl font-medium hover:bg-rose-600 transition-colors shadow-sm"
+                    >
+                      <Plus className="w-5 h-5" />
+                      Novo Produto
+                    </button>
+                  </div>
+
+                  {products.length === 0 ? (
+                    <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center">
+                      <Package className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                      <p className="text-slate-500">Nenhum produto cadastrado.</p>
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-200 text-sm font-semibold text-slate-600">
+                              <th className="p-4">Produto</th>
+                              <th className="p-4">Preço</th>
+                              <th className="p-4">Estoque</th>
+                              <th className="p-4 text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {products.map((product) => (
+                              <tr key={product.id} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="p-4">
+                                  <div className="flex items-center gap-3">
+                                    <img src={product.image} alt="" className="w-12 h-12 rounded-lg object-cover" />
+                                    <span className="font-semibold text-slate-900">{product.name}</span>
+                                  </div>
+                                </td>
+                                <td className="p-4 font-medium">R$ {product.price.toFixed(2).replace('.', ',')}</td>
+                                <td className="p-4">
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${product.stock > 10 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                                    {product.stock} un
+                                  </span>
+                                </td>
+                                <td className="p-4 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button onClick={() => handleEdit(product)} className="p-2 text-slate-400 hover:text-blue-600"><Edit2 className="w-4 h-4" /></button>
+                                    <button onClick={() => handleDelete(product.id)} className="p-2 text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* WhatsApp Settings */}
+            {!isAdding && (
+              <div className="mt-8 bg-white rounded-3xl shadow-sm border border-slate-200 p-6">
+                <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+                  <MessageCircle className="w-6 h-6 text-emerald-500" />
+                  Configurações do WhatsApp
+                </h2>
+                <div className="flex flex-col sm:flex-row gap-4 items-end">
+                  <div className="flex-1 w-full">
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Número</label>
+                    <input 
+                      type="text" 
+                      value={whatsappNumber}
+                      onChange={(e) => setWhatsappNumber(e.target.value.replace(/\D/g, ''))}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200"
+                    />
+                  </div>
+                  <button onClick={handleSaveWhatsapp} className="w-full sm:w-auto px-6 py-3 bg-emerald-500 text-white font-bold rounded-xl">Salvar</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>

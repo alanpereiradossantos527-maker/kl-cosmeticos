@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ShoppingBag, MessageCircle, Star, Sparkles, Camera, Plus, Trash2, Edit2, Package, Settings, ArrowLeft, Image as ImageIcon, CheckCircle2, ShoppingCart, X, Minus, Lock, Key, Bell, BellRing } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './supabase';
+import { analyzeProductImage, suggestPrice } from './lib/gemini';
 
 type Product = {
   id: string;
@@ -803,6 +804,7 @@ function AdminPanel({
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string, type: 'error' | 'success' } | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [isAnalysing, setIsAnalysing] = useState(false);
   
   // Form State
   const [formData, setFormData] = useState({
@@ -911,6 +913,33 @@ function AdminPanel({
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
+  };
+  
+  const handleIAAnalysis = async () => {
+    if (!formData.image) {
+      showToast('Por favor, adicione uma foto primeiro.');
+      return;
+    }
+
+    setIsAnalysing(true);
+    try {
+      const result = await analyzeProductImage(formData.image);
+      const suggestedPriceVal = await suggestPrice(result.suggestedName, result.suggestedDescription);
+      
+      setFormData(prev => ({
+        ...prev,
+        name: result.suggestedName,
+        description: result.suggestedDescription,
+        price: suggestedPriceVal.toString()
+      }));
+      
+      showToast('Sugestões da IA aplicadas!', 'success');
+    } catch (err: any) {
+      console.error(err);
+      showToast('Erro ao analisar com IA: ' + err.message);
+    } finally {
+      setIsAnalysing(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1150,6 +1179,17 @@ function AdminPanel({
                         className="hidden"
                       />
                     </div>
+                    {formData.image && (
+                      <button
+                        type="button"
+                        onClick={handleIAAnalysis}
+                        disabled={isAnalysing || isSaving}
+                        className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg disabled:opacity-50"
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        {isAnalysing ? 'Analisando...' : '✨ Usar IA Nano Banana'}
+                      </button>
+                    )}
                   </div>
                 </div>
 

@@ -7,7 +7,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ShoppingBag, MessageCircle, Star, Sparkles, Camera, Plus, Trash2, Edit2, Package, Settings, ArrowLeft, Image as ImageIcon, CheckCircle2, ShoppingCart, X, Minus, Lock, Key, Bell, BellRing } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './supabase';
-import { analyzeProductImage, suggestPrice } from './lib/gemini';
 
 type Product = {
   id: string;
@@ -21,6 +20,15 @@ type Product = {
 
 type CartItem = Product & {
   quantity: number;
+};
+
+type NotificationItem = {
+  id: string;
+  title: string;
+  message: string;
+  time: number;
+  type: 'new' | 'promo';
+  read: boolean;
 };
 
 const DEFAULT_WHATSAPP = '5599999999999';
@@ -354,9 +362,13 @@ function Storefront({
   const cartItemCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const unreadCount = notifications.filter(n => !n.read).length;
+
   const [newProductToast, setNewProductToast] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string, type: 'error' | 'success' } | null>(null);
-  const prevProductsLength = useRef(products.length);
+  const prevProducts = useRef<Product[]>(products);
 
   const showToast = (text: string, type: 'error' | 'success' = 'error') => {
     setToastMessage({ text, type });
@@ -364,12 +376,16 @@ function Storefront({
   };
 
   useEffect(() => {
-    if ('Notification' in window) {
-      setNotificationsEnabled(Notification.permission === 'granted');
-    }
-
     // Check for new products since last visit
     const lastSeenCount = parseInt(localStorage.getItem('@kl-cosmeticos:last-seen-count') || '0', 10);
+    const savedNotifications = localStorage.getItem('@kl-cosmeticos:notifications');
+    
+    if (savedNotifications) {
+      try {
+        setNotifications(JSON.parse(savedNotifications));
+      } catch (e) {}
+    }
+
     if (products.length > lastSeenCount && lastSeenCount > 0) {
       const newCount = products.length - lastSeenCount;
       setNewProductToast(newCount === 1 ? products[products.length - 1].name : `${newCount} novos produtos chegaram!`);
@@ -378,23 +394,66 @@ function Storefront({
     localStorage.setItem('@kl-cosmeticos:last-seen-count', products.length.toString());
   }, []);
 
+  // Save notifications to localStorage
   useEffect(() => {
-    if (products.length > prevProductsLength.current) {
-      const newProduct = products[products.length - 1];
-      
-      setNewProductToast(newProduct.name);
-      setTimeout(() => setNewProductToast(null), 5000);
+    localStorage.setItem('@kl-cosmeticos:notifications', JSON.stringify(notifications));
+  }, [notifications]);
 
-      if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
-        new Notification('Novo Produto na KL Cosméticos!', {
-          body: `${newProduct.name} acabou de chegar. Confira!`,
-        });
+  useEffect(() => {
+    // Detect new products or price drops (promotions)
+    if (products.length > prevProducts.current.length) {
+      // New Product Added
+      const newProduct = products.find(p => !prevProducts.current.find(oldP => oldP.id === p.id));
+      if (newProduct) {
+        const newNotif: NotificationItem = {
+          id: Math.random().toString(36).substr(2, 9),
+          title: 'Novo Chegando! ✨',
+          message: `${newProduct.name} acabou de ser cadastrado.`,
+          time: Date.now(),
+          type: 'new',
+          read: false
+        };
+        setNotifications(prev => [newNotif, ...prev].slice(0, 10)); // Keep last 10
+        
+        setNewProductToast(newProduct.name);
+        setTimeout(() => setNewProductToast(null), 5000);
+
+        if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
+          new Notification('Novo na KL Cosméticos!', { body: newNotif.message });
+        }
       }
-      
-      localStorage.setItem('@kl-cosmeticos:last-seen-count', products.length.toString());
+    } else if (products.length === prevProducts.current.length) {
+      // Check for price changes (promotions)
+      products.forEach(p => {
+        const oldP = prevProducts.current.find(op => op.id === p.id);
+        if (oldP && p.price < oldP.price) {
+          const promoNotif: NotificationItem = {
+            id: Math.random().toString(36).substr(2, 9),
+            title: 'Oferta Imperdível! 🔥',
+            message: `${p.name} agora está por apenas R$ ${p.price.toFixed(2).replace('.', ',')}!`,
+            time: Date.now(),
+            type: 'promo',
+            read: false
+          };
+          setNotifications(prev => [promoNotif, ...prev].slice(0, 10));
+          
+          if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
+            new Notification('Baixou o preço! 😍', { body: promoNotif.message });
+          }
+        }
+      });
     }
-    prevProductsLength.current = products.length;
+
+    prevProducts.current = products;
   }, [products, notificationsEnabled]);
+
+  const toggleNotifications = () => {
+    setShowNotifications(!showNotifications);
+    if (!showNotifications) {
+      // Mark all as read when opening
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    }
+  };
 
   const handleEnableNotifications = () => {
     if (!('Notification' in window)) {
@@ -436,13 +495,70 @@ function Storefront({
             <h1 className="text-2xl font-bold text-rose-600 tracking-tight">KL Cosméticos</h1>
           </div>
           <div className="flex items-center gap-4">
-            <button 
-              onClick={handleEnableNotifications}
-              className={`relative p-2 transition-colors rounded-full hover:bg-rose-50 ${notificationsEnabled ? 'text-rose-500' : 'text-slate-400 hover:text-rose-500'}`}
-              title={notificationsEnabled ? "Notificações Ativadas" : "Ativar Notificações"}
-            >
-              {notificationsEnabled ? <BellRing className="w-5 h-5" /> : <Bell className="w-5 h-5" />}
-            </button>
+            <div className="relative">
+              <button 
+                onClick={toggleNotifications}
+                className={`relative p-2 transition-colors rounded-full hover:bg-rose-50 ${notificationsEnabled || unreadCount > 0 ? 'text-rose-500' : 'text-slate-400 hover:text-rose-500'}`}
+                title="Notificações"
+              >
+                {unreadCount > 0 ? <BellRing className="w-5 h-5" /> : <Bell className="w-5 h-5" />}
+                {unreadCount > 0 && (
+                  <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 border-2 border-white rounded-full animate-pulse" />
+                )}
+              </button>
+
+              <AnimatePresence>
+                {showNotifications && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-10" 
+                      onClick={() => setShowNotifications(false)}
+                    />
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 z-20 overflow-hidden"
+                    >
+                      <div className="p-4 border-b border-slate-50 flex justify-between items-center bg-slate-50">
+                        <h3 className="font-bold text-slate-800">Novidades</h3>
+                        {!notificationsEnabled && (
+                          <button 
+                            onClick={handleEnableNotifications}
+                            className="text-[10px] bg-rose-500 text-white px-2 py-1 rounded-full font-bold hover:bg-rose-600 transition-colors"
+                          >
+                            Ativar Avisos
+                          </button>
+                        )}
+                      </div>
+                      <div className="max-h-80 overflow-y-auto">
+                        {notifications.length === 0 ? (
+                          <div className="p-8 text-center text-slate-400">
+                            <Bell className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                            <p className="text-sm">Nenhuma novidade por enquanto.</p>
+                          </div>
+                        ) : (
+                          notifications.map((n) => (
+                            <div key={n.id} className="p-4 border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                              <div className="flex items-start gap-3">
+                                <div className={`mt-1 w-2 h-2 rounded-full shrink-0 ${n.type === 'new' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                                <div>
+                                  <p className="text-xs font-bold text-slate-800">{n.title}</p>
+                                  <p className="text-sm text-slate-600 leading-tight mb-1">{n.message}</p>
+                                  <p className="text-[10px] text-slate-400">
+                                    {new Date(n.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
             <button 
               onClick={() => setIsCartOpen(true)}
               className="relative p-2 text-slate-600 hover:text-rose-500 transition-colors rounded-full hover:bg-rose-50"
@@ -804,7 +920,6 @@ function AdminPanel({
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string, type: 'error' | 'success' } | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [isAnalysing, setIsAnalysing] = useState(false);
   
   // Form State
   const [formData, setFormData] = useState({
@@ -915,31 +1030,9 @@ function AdminPanel({
     reader.readAsDataURL(file);
   };
   
-  const handleIAAnalysis = async () => {
-    if (!formData.image) {
-      showToast('Por favor, adicione uma foto primeiro.');
-      return;
-    }
-
-    setIsAnalysing(true);
-    try {
-      const result = await analyzeProductImage(formData.image);
-      const suggestedPriceVal = await suggestPrice(result.suggestedName, result.suggestedDescription);
-      
-      setFormData(prev => ({
-        ...prev,
-        name: result.suggestedName,
-        description: result.suggestedDescription,
-        price: suggestedPriceVal.toString()
-      }));
-      
-      showToast('Sugestões da IA aplicadas!', 'success');
-    } catch (err: any) {
-      console.error(err);
-      showToast('Erro ao analisar com IA: ' + err.message);
-    } finally {
-      setIsAnalysing(false);
-    }
+  const handleIAAnalysis = () => {
+    window.open('https://gemini.google.com/app', '_blank');
+    showToast('Abrindo o Gemini para você criar sua descrição! ✨', 'success');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1179,17 +1272,15 @@ function AdminPanel({
                         className="hidden"
                       />
                     </div>
-                    {formData.image && (
-                      <button
-                        type="button"
-                        onClick={handleIAAnalysis}
-                        disabled={isAnalysing || isSaving}
-                        className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg disabled:opacity-50"
-                      >
-                        <Sparkles className="w-4 h-4" />
-                        {isAnalysing ? 'Analisando...' : '✨ Usar IA Nano Banana'}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={handleIAAnalysis}
+                      disabled={isSaving}
+                      className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg disabled:opacity-50"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      Ir para o Gemini IA 🍌
+                    </button>
                   </div>
                 </div>
 

@@ -396,6 +396,7 @@ function Storefront({
   const [toastMessage, setToastMessage] = useState<{ text: string, type: 'error' | 'success' } | null>(null);
   const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
   const [filterProductId, setFilterProductId] = useState<string | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const prevProducts = useRef<Product[]>(products);
 
   const handleNotificationClick = (productId?: string) => {
@@ -403,6 +404,10 @@ function Storefront({
     
     setShowNotifications(false);
     setFilterProductId(productId);
+    
+    // Abrir detalhes automaticamente se o produto for encontrado
+    const product = products.find(p => p.id === productId);
+    if (product) setSelectedProduct(product);
     
     // Scroll para o topo dos produtos destacados
     setTimeout(() => {
@@ -811,7 +816,8 @@ function Storefront({
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
                   transition={{ duration: 0.4, delay: index * 0.1 }}
-                  className={`bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 border flex flex-col relative ${
+                  onClick={() => setSelectedProduct(product)}
+                  className={`bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 border flex flex-col relative cursor-pointer group/card ${
                     isOutOfStock ? 'opacity-75 grayscale-[0.5]' : ''
                   } ${
                     highlightedProductId === product.id 
@@ -858,7 +864,10 @@ function Storefront({
                     </div>
 
                     <button
-                      onClick={() => addToCart(product)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        addToCart(product);
+                      }}
                       disabled={isOutOfStock || isMaxQuantityInCart}
                       className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-medium transition-colors shadow-sm ${
                         isOutOfStock 
@@ -924,6 +933,95 @@ function Storefront({
           <p className="text-sm">© {new Date().getFullYear()} KL Cosméticos. Todos os direitos reservados.</p>
         </div>
       </footer>
+
+      {/* Product Detail Modal */}
+      <AnimatePresence>
+        {selectedProduct && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedProduct(null)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]"
+            >
+              <button 
+                onClick={() => setSelectedProduct(null)}
+                className="absolute top-4 right-4 z-10 p-2 bg-white/80 backdrop-blur-sm rounded-full text-slate-500 hover:text-rose-500 transition-colors shadow-sm"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="w-full md:w-1/2 aspect-square md:aspect-auto overflow-hidden bg-slate-100">
+                <img 
+                  src={selectedProduct.image} 
+                  alt={selectedProduct.name}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+
+              <div className="w-full md:w-1/2 p-6 md:p-8 flex flex-col overflow-y-auto">
+                <div className="mb-6">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="bg-rose-100 text-rose-600 text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider">
+                      Premium
+                    </span>
+                    <div className="flex items-center text-amber-400">
+                      <Star className="w-3 h-3 fill-current" />
+                      <span className="text-xs font-bold ml-1">5.0</span>
+                    </div>
+                  </div>
+                  <h2 className="text-2xl md:text-3xl font-bold text-slate-900 mb-2">{selectedProduct.name}</h2>
+                  <div className="text-3xl font-bold text-rose-600 mb-4">
+                    R$ {selectedProduct.price.toFixed(2).replace('.', ',')}
+                  </div>
+                  <div className="space-y-4">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-800 mb-1 uppercase tracking-widest">Descrição</h4>
+                      <p className="text-slate-600 leading-relaxed text-sm whitespace-pre-wrap">
+                        {selectedProduct.description}
+                      </p>
+                    </div>
+                    {selectedProduct.stock > 0 && (
+                      <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 px-3 py-2 rounded-xl text-sm font-medium w-fit">
+                        <CheckCircle2 className="w-4 h-4" />
+                        Em estoque ({selectedProduct.stock} disponíveis)
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-auto pt-6 border-t border-slate-100">
+                  <button
+                    onClick={() => {
+                      addToCart(selectedProduct);
+                      setSelectedProduct(null);
+                    }}
+                    disabled={selectedProduct.stock <= 0}
+                    className={`w-full flex items-center justify-center gap-3 py-4 px-6 rounded-2xl font-bold text-lg transition-all shadow-lg hover:shadow-xl active:scale-95 ${
+                      selectedProduct.stock <= 0
+                        ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                        : 'bg-rose-500 hover:bg-rose-600 text-white'
+                    }`}
+                  >
+                    <ShoppingCart className="w-6 h-6" />
+                    {selectedProduct.stock <= 0 ? 'Indisponível' : 'Adicionar ao Carrinho'}
+                  </button>
+                  <p className="text-center text-[10px] text-slate-400 mt-4">
+                    Pagamento e entrega combinados via WhatsApp após finalizar o pedido.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* New Product Toast */}
       <AnimatePresence>

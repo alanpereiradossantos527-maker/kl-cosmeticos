@@ -343,10 +343,13 @@ function LoginPanel({ onLogin, onCancel }: { onLogin: () => void, onCancel: () =
       }
     } catch (err: any) {
       console.error(err);
-      if (err.message === 'Invalid login credentials') {
+      const message = err.message || err.error_description || 'Erro desconhecido';
+      if (message === 'Invalid login credentials') {
         setError('Senha incorreta.');
+      } else if (message === 'Email not confirmed') {
+        setError('E-mail não confirmado. Verifique sua caixa de entrada.');
       } else {
-        setError('Erro ao fazer login. Verifique as configurações do Supabase.');
+        setError(`Erro: ${message}`);
       }
     } finally {
       setIsLoading(false);

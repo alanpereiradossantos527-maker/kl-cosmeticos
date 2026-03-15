@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ShoppingBag, MessageCircle, Star, Sparkles, Camera, Plus, Trash2, Edit2, Package, Settings, ArrowLeft, Image as ImageIcon, CheckCircle2, ShoppingCart, X, Minus, Lock, Key, Bell, BellRing } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './supabase';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 
 type Product = {
   id: string;
@@ -29,6 +30,7 @@ type NotificationItem = {
   time: number;
   type: 'new' | 'promo';
   read: boolean;
+  productId?: string;
 };
 
 const DEFAULT_WHATSAPP = '5599999999999';
@@ -173,40 +175,66 @@ export default function App() {
   if (!isLoaded) return null;
 
   return (
-    <div className="min-h-screen bg-rose-50 font-sans text-slate-800">
-      {view === 'store' && (
-        <Storefront 
-          products={products} 
-          cart={cart}
-          isCartOpen={isCartOpen}
-          setIsCartOpen={setIsCartOpen}
-          addToCart={addToCart}
-          removeFromCart={removeFromCart}
-          updateQuantity={updateQuantity}
-          clearCart={clearCart}
-          whatsappNumber={whatsappNumber}
-          onOpenAdmin={() => {
-            if (user && user.email === 'alanpereiradossantos527@gmail.com') {
-              setView('admin');
-            } else {
-              setView('login');
-            }
-          }} 
-        />
-      )}
-      {view === 'login' && (
-        <LoginPanel onLogin={() => setView('admin')} onCancel={() => setView('store')} />
-      )}
-      {view === 'admin' && (
-        <AdminPanel 
-          products={products} 
-          setProducts={setProducts} 
-          whatsappNumber={whatsappNumber}
-          setWhatsappNumber={setWhatsappNumber}
-          onClose={() => setView('store')} 
-        />
-      )}
-    </div>
+    <BrowserRouter>
+      <div className="min-h-screen bg-rose-50 font-sans text-slate-800">
+        <Routes>
+          {/* Rota do Cliente (Loja) */}
+          <Route 
+            path="/" 
+            element={
+              <Storefront 
+                products={products} 
+                cart={cart}
+                isCartOpen={isCartOpen}
+                setIsCartOpen={setIsCartOpen}
+                addToCart={addToCart}
+                removeFromCart={removeFromCart}
+                updateQuantity={updateQuantity}
+                clearCart={clearCart}
+                whatsappNumber={whatsappNumber}
+              />
+            } 
+          />
+
+          {/* Rota do Gestor (Admin) */}
+          <Route 
+            path="/admin" 
+            element={
+              <AdminRouteGuard 
+                user={user} 
+                products={products}
+                setProducts={setProducts}
+                whatsappNumber={whatsappNumber}
+                setWhatsappNumber={setWhatsappNumber}
+              />
+            } 
+          />
+
+          {/* Redirecionar qualquer outra coisa para a loja */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </div>
+    </BrowserRouter>
+  );
+}
+
+// Guarda de Rota para o Admin
+function AdminRouteGuard({ user, products, setProducts, whatsappNumber, setWhatsappNumber }: any) {
+  const navigate = useNavigate();
+  
+  // Se não estiver logado ou não for o admin, mostra o login
+  if (!user || user.email !== 'alanpereiradossantos527@gmail.com') {
+    return <LoginPanel onLogin={() => window.location.reload()} onCancel={() => navigate('/')} />;
+  }
+
+  return (
+    <AdminPanel 
+      products={products} 
+      setProducts={setProducts} 
+      whatsappNumber={whatsappNumber} 
+      setWhatsappNumber={setWhatsappNumber} 
+      onClose={() => navigate('/')} 
+    />
   );
 }
 
@@ -343,8 +371,7 @@ function Storefront({
   removeFromCart,
   updateQuantity,
   clearCart,
-  whatsappNumber,
-  onOpenAdmin 
+  whatsappNumber
 }: { 
   products: Product[], 
   cart: CartItem[],
@@ -354,8 +381,7 @@ function Storefront({
   removeFromCart: (id: string) => void,
   updateQuantity: (id: string, delta: number) => void,
   clearCart: () => void,
-  whatsappNumber: string,
-  onOpenAdmin: () => void 
+  whatsappNumber: string
 }) {
   
   const cartTotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
@@ -368,7 +394,30 @@ function Storefront({
 
   const [newProductToast, setNewProductToast] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string, type: 'error' | 'success' } | null>(null);
+  const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
+  const [filterProductId, setFilterProductId] = useState<string | null>(null);
   const prevProducts = useRef<Product[]>(products);
+
+  const handleNotificationClick = (productId?: string) => {
+    if (!productId) return;
+    
+    setShowNotifications(false);
+    setFilterProductId(productId);
+    
+    // Scroll para o topo dos produtos destacados
+    setTimeout(() => {
+      const section = document.getElementById('produtos');
+      if (section) {
+        section.scrollIntoView({ behavior: 'smooth' });
+        setHighlightedProductId(productId);
+        
+        // Remove o destaque após 3 segundos
+        setTimeout(() => {
+          setHighlightedProductId(null);
+        }, 3000);
+      }
+    }, 100);
+  };
 
   const showToast = (text: string, type: 'error' | 'success' = 'error') => {
     setToastMessage({ text, type });
@@ -411,7 +460,8 @@ function Storefront({
           message: `${newProduct.name} acabou de ser cadastrado.`,
           time: Date.now(),
           type: 'new',
-          read: false
+          read: false,
+          productId: newProduct.id
         };
         setNotifications(prev => [newNotif, ...prev].slice(0, 10)); // Keep last 10
         
@@ -433,7 +483,8 @@ function Storefront({
             message: `${p.name} agora está por apenas R$ ${p.price.toFixed(2).replace('.', ',')}!`,
             time: Date.now(),
             type: 'promo',
-            read: false
+            read: false,
+            productId: p.id
           };
           setNotifications(prev => [promoNotif, ...prev].slice(0, 10));
           
@@ -539,18 +590,22 @@ function Storefront({
                           </div>
                         ) : (
                           notifications.map((n) => (
-                            <div key={n.id} className="p-4 border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                            <button 
+                              key={n.id} 
+                              onClick={() => handleNotificationClick(n.productId)}
+                              className="w-full text-left p-4 border-b border-slate-50 hover:bg-rose-50 transition-colors group"
+                            >
                               <div className="flex items-start gap-3">
                                 <div className={`mt-1 w-2 h-2 rounded-full shrink-0 ${n.type === 'new' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
                                 <div>
-                                  <p className="text-xs font-bold text-slate-800">{n.title}</p>
+                                  <p className="text-xs font-bold text-slate-800 group-hover:text-rose-600 transition-colors">{n.title}</p>
                                   <p className="text-sm text-slate-600 leading-tight mb-1">{n.message}</p>
                                   <p className="text-[10px] text-slate-400">
                                     {new Date(n.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                   </p>
                                 </div>
                               </div>
-                            </div>
+                            </button>
                           ))
                         )}
                       </div>
@@ -569,13 +624,6 @@ function Storefront({
                   {cartItemCount}
                 </span>
               )}
-            </button>
-            <button 
-              onClick={onOpenAdmin}
-              className="p-2 text-slate-400 hover:text-rose-500 transition-colors rounded-full hover:bg-rose-50"
-              title="Painel de Controle"
-            >
-              <Settings className="w-5 h-5" />
             </button>
           </div>
         </div>
@@ -722,9 +770,23 @@ function Storefront({
 
       {/* Products Section */}
       <section id="produtos" className="max-w-5xl mx-auto px-4 py-12">
-        <div className="flex items-center justify-center gap-2 mb-10">
-          <h3 className="text-3xl font-bold text-slate-900 text-center">Nossos Produtos</h3>
-          <span className="text-2xl">💄</span>
+        <div className="flex flex-col items-center gap-4 mb-10">
+          <div className="flex items-center justify-center gap-2">
+            <h3 className="text-3xl font-bold text-slate-900 text-center">
+              {filterProductId ? 'Produto Selecionado' : 'Nossos Produtos'}
+            </h3>
+            <span className="text-2xl">{filterProductId ? '✨' : '💄'}</span>
+          </div>
+          
+          {filterProductId && (
+            <button 
+              onClick={() => setFilterProductId(null)}
+              className="flex items-center gap-2 text-rose-500 font-bold hover:text-rose-600 transition-colors bg-rose-50 px-4 py-2 rounded-full"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Ver todo o catálogo
+            </button>
+          )}
         </div>
 
         {products.length === 0 ? (
@@ -734,7 +796,9 @@ function Storefront({
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {products.map((product, index) => {
+            {products
+              .filter(p => !filterProductId || p.id === filterProductId)
+              .map((product, index) => {
               const isOutOfStock = product.stock <= 0;
               const cartItem = cart.find(item => item.id === product.id);
               const isMaxQuantityInCart = cartItem ? cartItem.quantity >= product.stock : false;
@@ -742,11 +806,18 @@ function Storefront({
               return (
                 <motion.div
                   key={product.id}
+                  id={`product-${product.id}`}
                   initial={{ opacity: 0, y: 20 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
                   transition={{ duration: 0.4, delay: index * 0.1 }}
-                  className={`bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 border border-rose-100 flex flex-col relative ${isOutOfStock ? 'opacity-75 grayscale-[0.5]' : ''}`}
+                  className={`bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 border flex flex-col relative ${
+                    isOutOfStock ? 'opacity-75 grayscale-[0.5]' : ''
+                  } ${
+                    highlightedProductId === product.id 
+                      ? 'border-rose-500 ring-4 ring-rose-200 shadow-2xl scale-[1.02] z-10' 
+                      : 'border-rose-100'
+                  }`}
                 >
                   {/* Stock Badge */}
                   <div className="absolute top-3 right-3 z-10">

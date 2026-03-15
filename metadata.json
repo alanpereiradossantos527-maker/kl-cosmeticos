@@ -1,0 +1,7 @@
+{
+  "name": "KL Cosméticos",
+  "description": "Mini site profissional de cosméticos com painel de gestão, fotos e pedidos via WhatsApp.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

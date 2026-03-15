@@ -98,6 +98,28 @@ export default function App() {
       setIsLoaded(true);
     };
 
+    fetchProducts();
+
+    // Subscribe to realtime changes for products (public)
+    const channel = supabase
+      .channel('db_products')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, (payload) => {
+        fetchProducts(); 
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Admin Data Fetching (Sales & Settings) - Protected by session check
+  useEffect(() => {
+    if (!user || user.email !== 'alanpereiradossantos527@gmail.com') {
+      setSales([]); // Clear sales if not admin
+      return;
+    }
+
     const fetchSales = async () => {
       const { data, error } = await supabase
         .from('sales')
@@ -111,24 +133,20 @@ export default function App() {
       }
     };
 
-    fetchProducts();
     fetchSales();
 
-    // Subscribe to realtime changes
-    const channel = supabase
-      .channel('db_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, (payload) => {
-        fetchProducts(); 
-      })
+    // Subscribe to realtime changes for sales (admin only)
+    const salesChannel = supabase
+      .channel('db_sales_admin')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, (payload) => {
         fetchSales();
       })
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(salesChannel);
     };
-  }, []);
+  }, [user]);
 
   // Load cart from localStorage on mount
   useEffect(() => {
